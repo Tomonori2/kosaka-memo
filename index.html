@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>高坂先生のメモAI</title>
+  <!-- スマホアプリ化（PWA）用 -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#4a90c4">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="メモAI">
+  <link rel="apple-touch-icon" href="icon.png">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Helvetica Neue', sans-serif;
+      min-height: 100vh;
+      color: #fff;
+      background: linear-gradient(160deg, #4a90c4 0%, #6aaed6 30%, #7ab84a 75%, #4a8a28 100%);
+      padding: 24px 16px 60px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    header { text-align: center; margin-bottom: 20px; }
+    header .icon { font-size: 64px; line-height: 1; }
+    header .icon-img {
+      height: 120px; width: auto; max-width: 280px; object-fit: contain;
+      filter: drop-shadow(0 4px 10px rgba(0,0,0,0.25));
+    }
+    header h1 {
+      font-size: 26px; margin-top: 8px;
+      background: linear-gradient(90deg, #fff, #ffd93d);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    header p { font-size: 13px; color: rgba(255,255,255,0.85); margin-top: 6px; }
+
+    .card {
+      width: 100%; max-width: 620px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 18px;
+      padding: 20px;
+      margin-bottom: 16px;
+      backdrop-filter: blur(8px);
+    }
+    .card .label { font-size: 12px; color: rgba(255,255,255,0.7); letter-spacing: 1px; margin-bottom: 12px; }
+
+    .btn {
+      border: none; border-radius: 12px; color: #fff;
+      padding: 12px 20px; font-size: 15px; font-weight: bold; cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-rec  { background: linear-gradient(135deg, #ff6b6b, #ffd93d); }
+    .btn-file { background: linear-gradient(135deg, #f093fb, #f5576c); }
+    .btn-sum  { background: linear-gradient(135deg, #667eea, #764ba2); }
+    .btn-meet { background: linear-gradient(135deg, #4ecdc4, #44a08d); }
+    .btn-ghost { background: rgba(255,255,255,0.15); font-weight: normal; font-size: 13px; padding: 8px 14px; }
+
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .status { font-size: 13px; color: rgba(255,255,255,0.85); }
+    .status.rec { color: #ffd93d; font-weight: bold; }
+
+    .result {
+      margin-top: 14px; padding: 14px; border-radius: 12px;
+      background: rgba(0,0,0,0.18); font-size: 15px; line-height: 1.8;
+      white-space: pre-wrap; min-height: 40px;
+    }
+    .hint { font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 8px; line-height: 1.6; }
+    .spin { display: inline-block; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header>
+    <img class="icon-img" src="robot.png" alt="高坂先生" onerror="this.outerHTML='<div class=\'icon\'>🤖</div>'">
+    <h1>高坂先生のメモAI</h1>
+    <p>録音や音声ファイルを、文字起こし＆要約します。ピポパポ！</p>
+  </header>
+
+  <!-- STEP 1: 音声を用意 -->
+  <div class="card">
+    <div class="label">STEP 1 ＿ 音声を用意する</div>
+    <div class="row">
+      <button class="btn btn-rec" id="rec-btn" onclick="toggleRec()">🔴 録音開始</button>
+      <button class="btn btn-file" onclick="document.getElementById('audio-file').click()">🎵 音声ファイルを選ぶ</button>
+      <span class="status" id="rec-status">ボタンを押して録音、または音声ファイルを選んでね</span>
+    </div>
+    <input type="file" id="audio-file" accept="audio/*,video/mp4,video/webm" style="display:none;" onchange="uploadFile(this)">
+    <div class="hint">📌 25MB・約30分まで（MP3 / M4A / WAV / WEBM など）</div>
+  </div>
+
+  <!-- STEP 2: 文字起こし結果 -->
+  <div class="card">
+    <div class="label">STEP 2 ＿ 文字起こし結果</div>
+    <div class="result" id="transcript">ここに文字起こしが表示されます</div>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn btn-sum"  id="sum-btn"  onclick="summarize('summary')" disabled>💫 要約する</button>
+      <button class="btn btn-meet" id="meet-btn" onclick="summarize('meeting')" disabled>📋 会議メモに整理</button>
+      <button class="btn btn-ghost" onclick="copyText('transcript')">📋 コピー</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: AIの要約 -->
+  <div class="card">
+    <div class="label">STEP 3 ＿ 高坂先生のまとめ</div>
+    <div class="result" id="summary">「要約する」か「会議メモに整理」を押してね</div>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn btn-ghost" onclick="copyText('summary')">📋 コピー</button>
+    </div>
+  </div>
+
+  <script>
+    var mediaRecorder = null, chunks = [], recTimer = null, recSeconds = 0;
+
+    // ===== 録音 =====
+    function toggleRec() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(function (stream) {
+          chunks = [];
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.ondataavailable = function (e) { if (e.data.size > 0) chunks.push(e.data); };
+          mediaRecorder.onstop = function () {
+            clearInterval(recTimer);
+            stream.getTracks().forEach(function (t) { t.stop(); });
+            var blob = new Blob(chunks, { type: 'audio/webm' });
+            var file = new File([blob], 'recording.webm', { type: 'audio/webm' });
+            sendForTranscribe(file);
+            setRecUI(false);
+          };
+          mediaRecorder.start();
+          recSeconds = 0;
+          setRecUI(true);
+          recTimer = setInterval(function () {
+            recSeconds++;
+            var m = String(Math.floor(recSeconds / 60)).padStart(2, '0');
+            var s = String(recSeconds % 60).padStart(2, '0');
+            document.getElementById('rec-status').textContent = '🔴 録音中 ' + m + ':' + s + '（もう一度押すと停止）';
+          }, 1000);
+        })
+        .catch(function () {
+          alert('マイクを使えませんでした。ブラウザのマイク許可を確認してね。');
+        });
+    }
+
+    function setRecUI(isRec) {
+      var btn = document.getElementById('rec-btn');
+      var st = document.getElementById('rec-status');
+      if (isRec) {
+        btn.textContent = '⏹ 停止して文字起こし';
+        st.className = 'status rec';
+      } else {
+        btn.textContent = '🔴 録音開始';
+        st.className = 'status';
+      }
+    }
+
+    // ===== ファイルアップロード =====
+    function uploadFile(input) {
+      var file = input.files[0];
+      if (!file) return;
+      sendForTranscribe(file);
+    }
+
+    // ===== 文字起こし =====
+    function sendForTranscribe(file) {
+      var el = document.getElementById('transcript');
+      el.innerHTML = '<span class="spin">🤖</span> 文字起こし中…（長いと数十秒かかります）';
+      document.getElementById('rec-status').textContent = '文字起こし中…';
+      var fd = new FormData();
+      fd.append('file', file);
+      fetch('/transcribe', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.ok) { el.textContent = '😅 ' + (data.error || '文字起こしに失敗しました'); return; }
+          el.textContent = data.text || '（音声を認識できませんでした）';
+          document.getElementById('sum-btn').disabled = false;
+          document.getElementById('meet-btn').disabled = false;
+          document.getElementById('rec-status').textContent = '✅ 文字起こし完了！STEP3で要約できます';
+        })
+        .catch(function () { el.textContent = '😅 通信エラーが起きました'; });
+    }
+
+    // ===== 要約 / 会議メモ =====
+    function summarize(mode) {
+      var text = document.getElementById('transcript').textContent;
+      var out = document.getElementById('summary');
+      out.innerHTML = '<span class="spin">🤖</span> 高坂先生が考え中…ピポパポ！';
+      fetch('/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text, mode: mode })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          out.textContent = data.ok ? data.result : ('😅 ' + (data.error || '要約に失敗しました'));
+        })
+        .catch(function () { out.textContent = '😅 通信エラーが起きました'; });
+    }
+
+    // ===== コピー =====
+    function copyText(id) {
+      var t = document.getElementById(id).textContent;
+      navigator.clipboard.writeText(t).then(function () {
+        alert('コピーしました！');
+      });
+    }
+
+    // ===== スマホアプリ化（Service Worker登録）=====
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js');
+      });
+    }
+  </script>
+</body>
+</html>
