@@ -9,7 +9,17 @@ _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
 
 # APIキーは環境変数から読む（コードには絶対に書かない）
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# 鍵が未設定でもアプリは起動できるようにする（起動時クラッシュを防ぐ）
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+
+def _need_key():
+    """鍵が未設定なら、分かりやすいエラーJSONを返す"""
+    return jsonify({
+        "ok": False,
+        "error": "サーバーにGROQ_API_KEYが設定されていません（RenderのEnvironmentに登録してね）",
+    }), 500
 
 
 @app.route("/")
@@ -28,6 +38,8 @@ def static_files(filename):
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
     """音声ファイルをWhisperで文字起こしする"""
+    if client is None:
+        return _need_key()
     if "file" not in request.files:
         return jsonify({"ok": False, "error": "ファイルがありません"}), 400
 
@@ -78,6 +90,8 @@ SUMMARY_PROMPTS = {
 @app.route("/summarize", methods=["POST"])
 def summarize():
     """文字起こしテキストをAIで要約 or 会議メモに整理する"""
+    if client is None:
+        return _need_key()
     data = request.get_json(silent=True) or {}
     text = (data.get("text") or "").strip()
     mode = data.get("mode", "summary")
