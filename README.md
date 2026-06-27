@@ -2,11 +2,13 @@
 
 音声をAIで自動文字起こし＆要約するWebアプリです。ピポパポ！
 
+サーバー不要の**完全クライアント側アプリ**。あなたのGroqキーで、ブラウザから直接AIを呼び出します。
+
 ## デモ
 
-👉 **https://kosaka-memo.onrender.com**
+👉 **https://tomonori2.github.io/kosaka-memo/**
 
-> 無料サーバーのため、初回起動に30秒〜1分かかることがあります。
+> 初回だけ、自分のGroq APIキーの登録が必要です（下記参照）。
 
 ## 機能
 
@@ -19,40 +21,51 @@
 
 ## 使い方
 
-1. マイクボタンで録音 or 音声ファイルを選ぶ
-2. 自動で文字起こし
-3. 「要約する」か「会議メモに整理」を押す
+1. **STEP 0** で自分のGroq APIキーを登録（最初の1回だけ）
+2. マイクボタンで録音 or 音声ファイルを選ぶ
+3. 自動で文字起こし
+4. 「要約する」か「会議メモに整理」を押す
+
+## 🔑 APIキーについて
+
+このアプリは **BYOK（Bring Your Own Key／自分の鍵を持参）** 方式です。
+
+- Groq APIキーは https://console.groq.com/keys で**無料**取得できます
+- 入力したキーは **あなたの端末のブラウザ（localStorage）にだけ**保存されます
+- キーは **Groq以外のどのサーバーにも送信されません**（このアプリにはサーバーがありません）
+- 料金は各自のGroqアカウントにかかります
+
+## 🔒 セキュリティ設計
+
+- サーバーを持たないため、第三者がキーや音声データを預かることがありません
+- 通信はすべて HTTPS（GitHub Pages）＋ Groqへの直接通信のみ
+- キーはブラウザ内のみ。別の端末・ブラウザには共有されません
 
 ## 使用技術
 
 | 技術 | 用途 |
 |------|------|
-| Python / Flask | バックエンド |
+| HTML / JavaScript | フロントエンド（サーバーレス） |
 | Groq API (Whisper) | 音声文字起こし |
 | Groq API (LLaMA 3.3) | 要約・会議メモ整理 |
-| Render | ホスティング |
+| GitHub Pages | ホスティング |
 | PWA | スマホアプリ化 |
 
 ## ローカルで動かす
 
+ビルド不要。静的ファイルを配信するだけです。
+
 ```bash
 git clone https://github.com/tomonori2/kosaka-memo.git
 cd kosaka-memo
-pip install -r requirements.txt
+python -m http.server 5050
 ```
 
-`.env` ファイルを作成：
-```
-GROQ_API_KEY=your_api_key_here
-```
+→ http://localhost:5050 にアクセス（マイク録音にはhttps か localhost が必要です）
 
-起動：
-```bash
-python app.py
-```
+## GitHub Pagesで公開する
 
-→ http://localhost:5050 にアクセス
-
-## APIキーの取得
-
-Groq APIキーは https://console.groq.com で無料取得できます。
+1. GitHubリポジトリの **Settings → Pages** を開く
+2. **Source** を `Deploy from a branch` にする
+3. Branch を `main`（フォルダは `/root`）に設定して Save
+4. 数分後 `https://<ユーザー名>.github.io/kosaka-memo/` で公開されます

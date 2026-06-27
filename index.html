@@ -59,11 +59,21 @@
     .btn-file { background: linear-gradient(135deg, #f093fb, #f5576c); }
     .btn-sum  { background: linear-gradient(135deg, #667eea, #764ba2); }
     .btn-meet { background: linear-gradient(135deg, #4ecdc4, #44a08d); }
+    .btn-key  { background: linear-gradient(135deg, #f7b733, #fc4a1a); }
     .btn-ghost { background: rgba(255,255,255,0.15); font-weight: normal; font-size: 13px; padding: 8px 14px; }
 
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .status { font-size: 13px; color: rgba(255,255,255,0.85); }
     .status.rec { color: #ffd93d; font-weight: bold; }
+
+    .key-input {
+      flex: 1; min-width: 200px;
+      border: 1px solid rgba(255,255,255,0.3); border-radius: 10px;
+      background: rgba(0,0,0,0.18); color: #fff;
+      padding: 11px 14px; font-size: 14px;
+    }
+    .key-input::placeholder { color: rgba(255,255,255,0.5); }
+    .key-input:focus { outline: none; border-color: #ffd93d; }
 
     .result {
       margin-top: 14px; padding: 14px; border-radius: 12px;
@@ -71,6 +81,7 @@
       white-space: pre-wrap; min-height: 40px;
     }
     .hint { font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 8px; line-height: 1.6; }
+    .hint a { color: #ffd93d; }
     .spin { display: inline-block; animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
@@ -81,6 +92,20 @@
     <h1>高坂先生のメモAI</h1>
     <p>録音や音声ファイルを、文字起こし＆要約します。ピポパポ！</p>
   </header>
+
+  <!-- STEP 0: Groq APIキー -->
+  <div class="card">
+    <div class="label">STEP 0 ＿ Groqのキーを登録する（最初の1回だけ）</div>
+    <div class="row">
+      <input type="password" class="key-input" id="api-key" placeholder="gsk_... で始まるキーを貼り付け" autocomplete="off">
+      <button class="btn btn-key" onclick="saveKey()">💾 保存</button>
+      <span class="status" id="key-status"></span>
+    </div>
+    <div class="hint">
+      🔒 キーは<b>このスマホ／パソコンの中だけ</b>に保存され、どこのサーバーにも送られません。<br>
+      🔑 キーの取得（無料）→ <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>
+    </div>
+  </div>
 
   <!-- STEP 1: 音声を用意 -->
   <div class="card">
@@ -115,14 +140,60 @@
   </div>
 
   <script>
-    var mediaRecorder = null, chunks = [], recTimer = null, recSeconds = 0;
+    // ===== Groq APIの設定 =====
+    // キーは各自のもの。この端末のlocalStorageにだけ保存し、Groq以外には送らない。
+    var GROQ_BASE = 'https://api.groq.com/openai/v1';
+    var KEY_STORAGE = 'groq_api_key';
+    var MAX_SIZE = 25 * 1024 * 1024; // 25MB（Whisperの上限）
+
+    // 要約モードごとのAIへの指示書
+    var SUMMARY_PROMPTS = {
+      summary:
+        'あなたは福井県出身の癒し系ロボット『高坂先生』です。口癖は「ピポパポ！」。' +
+        '渡された文字起こしを、要点だけ分かりやすく箇条書きで要約してください。' +
+        '難しい言葉は使わず、最後に高坂先生らしいひとことを添えてください。',
+      meeting:
+        'あなたは会議の書記を担当する『高坂先生』です。' +
+        '渡された文字起こしを、次の見出しで整理してください:\n' +
+        '【議題】\n【主な発言・意見】\n【決定事項】\n【次にやること（担当・期限があれば）】\n' +
+        '発言が曖昧な部分は推測せず『不明』と書いてください。'
+    };
+
+    // ===== キーの保存・読み込み =====
+    function getKey() { return (localStorage.getItem(KEY_STORAGE) || '').trim(); }
+
+    function saveKey() {
+      var v = document.getElementById('api-key').value.trim();
+      var st = document.getElementById('key-status');
+      if (!v) { st.textContent = '⚠️ キーが空です'; return; }
+      localStorage.setItem(KEY_STORAGE, v);
+      st.textContent = '✅ 保存しました';
+      document.getElementById('api-key').value = '';
+    }
+
+    function requireKey() {
+      var k = getKey();
+      if (!k) {
+        alert('先にSTEP 0でGroqのキーを登録してね。\nconsole.groq.com/keys で無料で取れます。');
+        return null;
+      }
+      return k;
+    }
+
+    // 起動時：保存済みなら案内を出す（キー自体は画面に表示しない）
+    window.addEventListener('load', function () {
+      if (getKey()) document.getElementById('key-status').textContent = '✅ 登録済み';
+    });
 
     // ===== 録音 =====
+    var mediaRecorder = null, chunks = [], recTimer = null, recSeconds = 0;
+
     function toggleRec() {
       if (mediaRecorder && mediaRecorder.state === 'recording') {
         mediaRecorder.stop();
         return;
       }
+      if (!requireKey()) return;
       navigator.mediaDevices.getUserMedia({ audio: true })
         .then(function (stream) {
           chunks = [];
@@ -170,40 +241,97 @@
       sendForTranscribe(file);
     }
 
-    // ===== 文字起こし =====
+    // ===== 文字起こし（Groqに直接送る）=====
     function sendForTranscribe(file) {
       var el = document.getElementById('transcript');
+      var key = requireKey();
+      if (!key) return;
+
+      if (file.size > MAX_SIZE) {
+        el.textContent = '😅 ファイルが大きすぎます（25MBまで）';
+        return;
+      }
+
       el.innerHTML = '<span class="spin">🤖</span> 文字起こし中…（長いと数十秒かかります）';
       document.getElementById('rec-status').textContent = '文字起こし中…';
+
       var fd = new FormData();
       fd.append('file', file);
-      fetch('/transcribe', { method: 'POST', body: fd })
-        .then(function (r) { return r.json(); })
+      fd.append('model', 'whisper-large-v3');
+      fd.append('response_format', 'verbose_json');
+      fd.append('language', 'ja');
+
+      fetch(GROQ_BASE + '/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + key },
+        body: fd
+      })
+        .then(parseGroq)
         .then(function (data) {
-          if (!data.ok) { el.textContent = '😅 ' + (data.error || '文字起こしに失敗しました'); return; }
-          el.textContent = data.text || '（音声を認識できませんでした）';
+          var text = (data.text || '').trim();
+          el.textContent = text || '（音声を認識できませんでした）';
           document.getElementById('sum-btn').disabled = false;
           document.getElementById('meet-btn').disabled = false;
           document.getElementById('rec-status').textContent = '✅ 文字起こし完了！STEP3で要約できます';
         })
-        .catch(function () { el.textContent = '😅 通信エラーが起きました'; });
+        .catch(function (err) {
+          el.textContent = '😅 ' + friendlyError(err);
+          document.getElementById('rec-status').textContent = '文字起こしに失敗しました';
+        });
     }
 
-    // ===== 要約 / 会議メモ =====
+    // ===== 要約 / 会議メモ（Groqに直接送る）=====
     function summarize(mode) {
       var text = document.getElementById('transcript').textContent;
       var out = document.getElementById('summary');
+      var key = requireKey();
+      if (!key) return;
+      if (!SUMMARY_PROMPTS[mode]) mode = 'summary';
+
       out.innerHTML = '<span class="spin">🤖</span> 高坂先生が考え中…ピポパポ！';
-      fetch('/summarize', {
+
+      fetch(GROQ_BASE + '/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: text, mode: mode })
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          out.textContent = data.ok ? data.result : ('😅 ' + (data.error || '要約に失敗しました'));
+        headers: {
+          'Authorization': 'Bearer ' + key,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: SUMMARY_PROMPTS[mode] },
+            { role: 'user', content: text }
+          ]
         })
-        .catch(function () { out.textContent = '😅 通信エラーが起きました'; });
+      })
+        .then(parseGroq)
+        .then(function (data) {
+          out.textContent = data.choices[0].message.content;
+        })
+        .catch(function (err) {
+          out.textContent = '😅 ' + friendlyError(err);
+        });
+    }
+
+    // ===== Groqのレスポンス処理 =====
+    function parseGroq(r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (!r.ok) {
+          var msg = (data && data.error && data.error.message) || ('エラー (HTTP ' + r.status + ')');
+          var e = new Error(msg);
+          e.status = r.status;
+          throw e;
+        }
+        return data;
+      });
+    }
+
+    // ユーザーに見せる分かりやすいエラー文（キーなどの内部情報は出さない）
+    function friendlyError(err) {
+      if (err && err.status === 401) return 'キーが正しくないようです。STEP 0で登録し直してね。';
+      if (err && err.status === 429) return '使いすぎ・上限のようです。少し待ってからもう一度。';
+      if (err && err.message) return err.message;
+      return '通信エラーが起きました';
     }
 
     // ===== コピー =====

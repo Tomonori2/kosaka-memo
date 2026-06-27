@@ -20,11 +20,11 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// 文字起こし・要約のAPIは常に最新を取りに行き、画面部品はオフラインでも出す
+// Groqへの通信は常にネットへ。画面部品（同一オリジン）だけオフライン対応する
 self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-  if (url.pathname.startsWith('/transcribe') || url.pathname.startsWith('/summarize')) {
-    return; // APIはネット必須なのでキャッシュしない
+  // 別オリジン（Groq APIなど）はキャッシュに触れず、そのまま通す
+  if (new URL(e.request.url).origin !== self.location.origin) {
+    return;
   }
   e.respondWith(
     fetch(e.request)
